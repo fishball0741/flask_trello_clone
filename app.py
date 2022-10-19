@@ -1,10 +1,10 @@
 from flask import Flask, jsonify, request
 from flask_sqlalchemy import SQLAlchemy
-from datetime import date
+from datetime import date, timedelta   #timedelta = limited the token time(allows the period of time in any units we want, make them will expire in the specify day)
 from flask_marshmallow import Marshmallow
-from flask_bcrypt import Bcrypt
+from flask_bcrypt import Bcrypt   #for encrypt
 from sqlalchemy.exc import IntegrityError
-
+from flask_jwt_extended import JWTManager, create_access_token, jwt_required    # jwt extension can generate the toker for flask and json
 
 
 app = Flask(__name__)
@@ -12,12 +12,14 @@ app.config ['JSON_SORT_KEYS'] = False
 
 #it's for connect the database > protocol + adoptor:// user:password@ipaddress:port/db name
 app.config['SQLALCHEMY_DATABASE_URI'] = 'postgresql+psycopg2://trello_dev:password123@127.0.0.1:5432/trello'
+app.config['JWT_SECRET_KEY'] = 'hello there'   #for create a secret key for encrypt the token. generate a random token, but when will making an app, maybe using the fix code
 #direct using SQL
 #ORM
 # Flask app application
 db = SQLAlchemy(app)
 ma = Marshmallow(app)
 bcrypt = Bcrypt(app)
+jwt = JWTManager(app)
 
 class User(db.Model):
     __tablename__ = 'users'
@@ -148,16 +150,26 @@ def auth_register():  #encode and python object, can use json to convert as well
 # Login route  only for POST
 @app.route('/auth/login/', methods=['POST'])   
 def auth_login():   #check any account/email/user name in DB first.
-    # create a statement first  ,  and search the email and password (need to yse the bcrypt script, because it's hash)
-    stmt = db.select(User).filter_by(email=request.json['email'], password=bcrypt.generate_password_hash(request.json['password']).decode('utf-8')) 
-    print(stmt)
-    user = db.session.scalars(stmt)
-    print(user)
-    return UserSchema(exclude=['password']).dump(user)   #200 = default
+    #  Find a use by email address
+    stmt = db.select(User).filter_by(email=request.json['email'])   # or using  db.select(User).where(User.email == request.json['email'])  < comparison, so need  ==
+    user = db.session.scalar(stmt)
+
+    # create a statement first  ,  and search the email and password (CANNOT USE generate_password_hash) >>> the generate_salt will produce random, so can't match the original pw hash
+    # check_password_hash        
+    # If user exists and password is correct  
+    if user and bcrypt.check_password_hash(user.password, request.json['password']):
+        # return UserSchema(exclude=['password']).dump(user)   #200 = default
+        #what we want to identity for the user, by email? by the ID number?
+        token = create_access_token(identity=str(user.id), expires_delta=timedelta(days=1))    #set the id will be a string from user.id, and expires in one days
+        return {'email': user.email, 'token': token, 'is_admin': user.is_admin}   #using this instead of Schema because we dont want to return all the details and also want to have token.
+    # If user exists and password is not correct,   security reason, dont specifically say what's wrong, pw or email.
+    else:
+        return {'error': 'Invalid password or email'}, 401
 
 # can terminal  >  flask drop && flask create && flask seed  < to do all
 
 @app.route('/cards/')
+@jwt_required()
 def all_cards():
     # select * from cards;
     # cards = Card.query.all()
@@ -175,7 +187,7 @@ def first_card():
     # select * from cards limit 1;
     # card = Card.query.first()
     stmt = db.select(Card).limit(1)
-    card = db.session.scalar(stmt)
+    card = db.session.scalars(stmt)
     print(card.__dict__)
 
 @app.cli.command('count_ongoing')
