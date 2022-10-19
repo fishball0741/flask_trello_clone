@@ -125,20 +125,35 @@ def seed_db():
 def auth_register():  #encode and python object, can use json to convert as well
     try:
         # Load the posted user info and parse the JSON
-        user_info = UserSchema().load(request.json)   #need to request data
-        print(user_info)
+        # user_info = UserSchema().load(request.json)   #need to request data
+        # print(user_info)
         # Create a new User Model instance from the user_info
-        user = User()
-        user.email = user_info['email']     #those using [ ] instead of  user_info.email  < can't use it
-        user.password = bcrypt.generate_password_hash(user_info['password']).decode('utf-8'),
-        user.name = user_info['name']
-
+        user = User(
+            email = request.json['email'],     #those using [ ] instead of  user_info.email  < can't use it
+            password = bcrypt.generate_password_hash(request.json['password']).decode('utf-8'),    #encrypt the password, hash the password
+            name = request.json['name']
+        )
+        # add and commit user to DB
         db.session.add(user)
         db.session.commit()
+        # respond to client
         return UserSchema(exclude=['password']).dump(user), 201   #normally use 201     , need to exculde the password here as dont want to show the password hash
 
+        # In this case (complex multi-running flow) after client input, will check the db, and see any data already in the database, if yes, then return the error
     except IntegrityError:
         return {'error': 'Email address already in use'}, 409
+
+
+
+# Login route  only for POST
+@app.route('/auth/login/', methods=['POST'])   
+def auth_login():   #check any account/email/user name in DB first.
+    # create a statement first  ,  and search the email and password (need to yse the bcrypt script, because it's hash)
+    stmt = db.select(User).filter_by(email=request.json['email'], password=bcrypt.generate_password_hash(request.json['password']).decode('utf-8')) 
+    print(stmt)
+    user = db.session.scalars(stmt)
+    print(user)
+    return UserSchema(exclude=['password']).dump(user)   #200 = default
 
 # can terminal  >  flask drop && flask create && flask seed  < to do all
 
